@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>🎵 Spotify | Movvify</title>
+
+    <!-- Basic styling -->
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #1db954, #121212);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+
+        p {
+            font-size: 1.2rem;
+            opacity: 0.85;
+            margin-bottom: 30px;
+        }
+
+        .loader {
+            border: 6px solid rgba(255, 255, 255, 0.2);
+            border-top: 6px solid #1db954;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1.2s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        a {
+            color: #1db954;
+            text-decoration: none;
+            font-weight: 500;
+            border: 2px solid #1db954;
+            padding: 10px 20px;
+            border-radius: 30px;
+            transition: all 0.3s ease;
+        }
+
+        a:hover {
+            background-color: #1db954;
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="loader"></div>
+    <h1>Spotify Downloader 🎶</h1>
+    <p>We’re working hard to bring Spotify downloads to Movvify soon!</p>
+    <a href="/">⬅ Back to Home</a>
+</body>
+
+</html>

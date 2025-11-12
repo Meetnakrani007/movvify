@@ -1,0 +1,27 @@
+const express = require("express");
+const path = require("path");
+const { urlencoded } = require("body-parser");
+const indexRoute = require("./routes/index.js");
+const youtubeRoute = require("./routes/youtube.js");
+const sptifyRoute = require("./routes/spotify.js");
+
+const app = express();
+
+//middleware
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+//setup ejs
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
+
+app.use("/", indexRoute);
+app.use("/yt", youtubeRoute);
+app.use("/spotify", sptifyRoute);
+
+const PORT = process.env.PORT || 6464;
+app.listen(PORT, () => {
+  console.log(`Serever running on http://localhost:${PORT}`);
+});

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Movvify — YouTube</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+
+<body>
+    <main class="container">
+        <h1>🎥 YouTube Downloader</h1>
+        <form action="/download" method="POST">
+            <input type="url" name="url" placeholder="Paste YouTube video or playlist link" required />
+            <select name="quality" required>
+                <option value="144">144p</option>
+                <option value="240">240p</option>
+                <option value="360">360p</option>
+                <option value="480">480p</option>
+                <option value="720">720p</option>
+                <option value="1080">1080p</option>
+                <option value="2160">4K (2160p)</option>
+                <option value="best">Best Available</option>
+            </select>
+            <button type="submit">Download 🎬</button>
+        </form>
+        <p class="hint">Files will save to your browser's Downloads folder. </p>
+        <p><a href="/">← Back home</a></p>
+    </main>
+</body>
+
+</html>
