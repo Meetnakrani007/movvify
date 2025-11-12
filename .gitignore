@@ -9,6 +9,11 @@ node_modules/
 .env.test.local
 .env.production.local
 
+downloads/
+*.mp4
+*.webm
+*.part
+
 # Logs
 logs/
 *.log

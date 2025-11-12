@@ -1,6 +1,5 @@
 const express = require("express");
 const path = require("path");
-const { urlencoded } = require("body-parser");
 const indexRoute = require("./routes/index.js");
 const youtubeRoute = require("./routes/youtube.js");
 const spotifyRoute = require("./routes/spotify.js");
@@ -25,5 +24,5 @@ app.use("/download", downloadRoute);
 
 const PORT = process.env.PORT || 6464;
 app.listen(PORT, () => {
-  console.log(`Serever running on http://localhost:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });

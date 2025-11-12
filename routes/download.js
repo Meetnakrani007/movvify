@@ -43,8 +43,8 @@ router.post("/", (req, res) => {
 
   const cookiesArg = fs.existsSync(cookiesPath)
     ? `--cookies "${cookiesPath}"`
-    : "";
-  const command = `yt-dlp --cookies-from-browser chrome --no-check-certificate -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
+    : "--cookies-from-browser chrome";
+  const command = `yt-dlp ${cookiesArg} --no-check-certificate -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
 
   console.log(`Starting download for single video: ${safeUrl}`);
   console.log(`Command: ${command}`);
@@ -116,6 +116,25 @@ router.post("/playlist-info", (req, res) => {
   });
 });
 
+router.get("/file/:filename", (req, res) => {
+  const filename = req.params.filename;
+  const filepath = path.join(downloadsDir, filename);
+  
+  if (!fs.existsSync(filepath)) {
+    return res.status(404).send("File not found.");
+  }
+  
+  res.download(filepath, filename, (err) => {
+    if (err) console.error("Download error:", err);
+    setTimeout(() => {
+      if (fs.existsSync(filepath)) {
+        fs.unlinkSync(filepath);
+        console.log("Cleaned up file:", filename);
+      }
+    }, 3000);
+  });
+});
+
 router.get("/download-video", (req, res) => {
   const videoUrl = req.query.url;
   const quality = req.query.quality || "best";
@@ -148,7 +167,7 @@ router.get("/download-video", (req, res) => {
   const safeUrl = videoUrl.trim();
   const cookiesArg = fs.existsSync(cookiesPath)
     ? `--cookies "${cookiesPath}"`
-    : "";
+    : "--cookies-from-browser chrome";
   const command = `yt-dlp ${cookiesArg} -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
 
   console.log(`Starting download for: ${safeUrl}`);
@@ -201,15 +220,21 @@ router.get("/progress", (req, res) => {
 
   const cookiesArg = fs.existsSync(cookiesPath)
     ? [`--cookies`, cookiesPath]
-    : [];
+    : ["--cookies-from-browser", "chrome"];
+
+  const timestamp = Date.now();
+  const filename = `movvify_${timestamp}.mp4`;
+  const filepath = path.join(downloadsDir, filename);
 
   const args = [
     "--newline",
     "-f",
     format,
     "--no-playlist",
+    "--merge-output-format",
+    "mp4",
     "-o",
-    "-",
+    filepath,
     url,
     ...cookiesArg,
   ];
@@ -228,13 +253,24 @@ router.get("/progress", (req, res) => {
     }
   });
 
-  yt.on("close", () => {
-    res.write("data: 100\n\n");
+  yt.on("close", (code) => {
+    if (code === 0) {
+      res.write(`data: 100\n\n`);
+      res.write(`data: done:${filename}\n\n`);
+    } else {
+      res.write(`data: error\n\n`);
+    }
     res.end();
   });
 
   yt.stderr.on("data", (err) => {
-    console.error(err.toString());
+    const text = err.toString();
+    console.error(text);
+    // Also check stderr for progress (yt-dlp sometimes outputs progress to stderr)
+    const match = text.match(/\[download\]\s+(\d+\.\d+)%/);
+    if (match) {
+      res.write(`data: ${match[1]}\n\n`);
+    }
   });
 });
 

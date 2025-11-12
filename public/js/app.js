@@ -123,6 +123,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const quality = document.querySelector("select[name='quality']").value;
     if (!url) return alert("Please enter a valid YouTube link!");
 
+    // Check if it's a playlist
+    if (url.includes("list=")) {
+      alert("Please use the 'Download All' button for playlists.");
+      return;
+    }
+
     progressArea.style.display = "block";
     progressText.innerText = "Starting...";
     progressFill.style.width = "0%";
@@ -131,18 +137,51 @@ document.addEventListener("DOMContentLoaded", () => {
       "/download/progress?" + new URLSearchParams({ url, quality })
     );
 
-    evtSrc.onmessage = (e) => {
-      const percent = parseFloat(e.data);
-      progressFill.style.width = percent + "%";
-      progressText.innerText = `Downloading... ${percent.toFixed(1)}%`;
+    let downloadFilename = null;
 
-      if (percent >= 100) {
-        progressText.innerText = "Download complete!";
+    evtSrc.onmessage = (e) => {
+      const data = e.data;
+      
+      if (data.startsWith("done:")) {
+        // Download complete, trigger file download
+        downloadFilename = data.split(":")[1];
+        progressText.innerText = "Download complete! Preparing file...";
+        progressFill.style.width = "100%";
+        
+        setTimeout(() => {
+          evtSrc.close();
+          // Serve the already-downloaded file
+          const downloadUrl = `/download/file/${downloadFilename}`;
+          window.location.href = downloadUrl;
+          setTimeout(() => {
+            progressArea.style.display = "none";
+          }, 1000);
+        }, 500);
+        return;
+      }
+      
+      if (data === "error") {
+        progressText.innerText = "Download failed. Please try again.";
+        evtSrc.close();
         setTimeout(() => {
           progressArea.style.display = "none";
-          evtSrc.close();
-        }, 4000);
+        }, 3000);
+        return;
       }
+      
+      const percent = parseFloat(data);
+      if (!isNaN(percent)) {
+        progressFill.style.width = percent + "%";
+        progressText.innerText = `Downloading... ${percent.toFixed(1)}%`;
+      }
+    };
+
+    evtSrc.onerror = () => {
+      evtSrc.close();
+      // Fallback: trigger download directly if progress fails
+      progressText.innerText = "Starting download...";
+      const downloadUrl = `/download/download-video?url=${encodeURIComponent(url)}&quality=${encodeURIComponent(quality)}`;
+      window.location.href = downloadUrl;
     };
   });
 
@@ -150,11 +189,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return new Promise((res) => setTimeout(res, ms));
   }
 
-  function showProgress(current, total) {
+  function showProgress(current, total, percent) {
     progressArea.style.display = "block";
-    const percent = Math.round((current / total) * 100);
-    progressFill.style.width = `${percent}%`;
-    progressText.innerText = `Downloading ${current} / ${total} (${percent}%)`;
+    const calculatedPercent = percent !== undefined ? percent : Math.round((current / total) * 100);
+    progressFill.style.width = `${calculatedPercent}%`;
+    progressText.innerText = `Downloading ${current} / ${total} (${calculatedPercent}%)`;
   }
 
   function resetProgress() {
