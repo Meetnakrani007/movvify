@@ -9,6 +9,58 @@ const cookiesPath = path.join(process.cwd(), "cookies.txt");
 
 if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
 
+// Helper function to get cookie arguments with fallback
+function getCookieArgs() {
+  if (fs.existsSync(cookiesPath)) {
+    // Check if cookies file is valid (not empty and recent)
+    const stats = fs.statSync(cookiesPath);
+    const fileSize = stats.size;
+    const ageInHours = (Date.now() - stats.mtime.getTime()) / (1000 * 60 * 60);
+    
+    // If cookies file exists, is not empty, and is less than 7 days old, use it
+    if (fileSize > 100 && ageInHours < 168) {
+      return [`--cookies`, cookiesPath];
+    }
+  }
+  // Fallback to browser cookies
+  return ["--cookies-from-browser", "chrome"];
+}
+
+// Helper function to get cookie args as string (for exec commands)
+function getCookieArgsString() {
+  if (fs.existsSync(cookiesPath)) {
+    const stats = fs.statSync(cookiesPath);
+    const fileSize = stats.size;
+    const ageInHours = (Date.now() - stats.mtime.getTime()) / (1000 * 60 * 60);
+    
+    if (fileSize > 100 && ageInHours < 168) {
+      return `--cookies "${cookiesPath}"`;
+    }
+  }
+  return "--cookies-from-browser chrome";
+}
+
+// Helper function to detect bot detection errors
+function isBotDetectionError(stderr) {
+  if (!stderr) return false;
+  const errorLower = stderr.toLowerCase();
+  return (
+    errorLower.includes("sign in to confirm") ||
+    errorLower.includes("not a bot") ||
+    errorLower.includes("bot detection") ||
+    errorLower.includes("please sign in")
+  );
+}
+
+// Helper function to add additional yt-dlp options to avoid detection
+function getAntiDetectionArgs() {
+  return [
+    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "--extractor-args", "youtube:player_client=web",
+    "--throttled-rate", "1M",
+  ];
+}
+
 router.post("/", (req, res) => {
   const { url, quality } = req.body;
 
@@ -41,17 +93,22 @@ router.post("/", (req, res) => {
 
   const safeUrl = url.trim();
 
-  const cookiesArg = fs.existsSync(cookiesPath)
-    ? `--cookies "${cookiesPath}"`
-    : "--cookies-from-browser chrome";
-  const command = `yt-dlp ${cookiesArg} --no-check-certificate -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
+  const cookiesArg = getCookieArgsString();
+  const antiDetectionArgs = getAntiDetectionArgs().join(" ");
+  const command = `yt-dlp ${cookiesArg} ${antiDetectionArgs} --no-check-certificate -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
 
   console.log(`Starting download for single video: ${safeUrl}`);
-  console.log(`Command: ${command}`);
 
-  exec(command, (error, stdout, stderr) => {
+  exec(command, { timeout: 300000 }, (error, stdout, stderr) => {
     if (error) {
       console.error("Download error:", stderr);
+      
+      if (isBotDetectionError(stderr)) {
+        return res
+          .status(429)
+          .send("<h3>YouTube rate limit detected. Please wait a few minutes and try again, or update your cookies file.</h3>");
+      }
+      
       return res
         .status(500)
         .send("<h3>Download failed. Please check your link or try again.</h3>");
@@ -81,12 +138,11 @@ router.post("/playlist-info", (req, res) => {
 
   console.log(`Fetching playlist info for: ${url}`);
 
-  const cookiesArg = fs.existsSync(cookiesPath)
-    ? `--cookies "${cookiesPath}"`
-    : "";
-  const command = `yt-dlp ${cookiesArg} --flat-playlist -J "${url}"`;
+  const cookiesArg = getCookieArgsString();
+  const antiDetectionArgs = getAntiDetectionArgs().join(" ");
+  const command = `yt-dlp ${cookiesArg} ${antiDetectionArgs} --flat-playlist -J "${url}"`;
 
-  exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+  exec(command, { maxBuffer: 1024 * 1024 * 10, timeout: 60000 }, (error, stdout, stderr) => {
     if (error) {
       console.error("Playlist fetch error:", stderr);
       return res
@@ -165,17 +221,20 @@ router.get("/download-video", (req, res) => {
       : "bv*+ba/best";
 
   const safeUrl = videoUrl.trim();
-  const cookiesArg = fs.existsSync(cookiesPath)
-    ? `--cookies "${cookiesPath}"`
-    : "--cookies-from-browser chrome";
-  const command = `yt-dlp ${cookiesArg} -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
+  const cookiesArg = getCookieArgsString();
+  const antiDetectionArgs = getAntiDetectionArgs().join(" ");
+  const command = `yt-dlp ${cookiesArg} ${antiDetectionArgs} -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
 
   console.log(`Starting download for: ${safeUrl}`);
-  console.log(`Command: ${command}`);
 
-  exec(command, (error, stdout, stderr) => {
+  exec(command, { timeout: 300000 }, (error, stdout, stderr) => {
     if (error) {
       console.error("Error downloading video:", stderr);
+      
+      if (isBotDetectionError(stderr)) {
+        return res.status(429).send("YouTube rate limit detected. Please wait a few minutes and try again.");
+      }
+      
       return res.status(500).send("Download failed.");
     }
 
@@ -218,9 +277,8 @@ router.get("/progress", (req, res) => {
       ? "bv*[height=2160]+ba"
       : "bv*+ba/best";
 
-  const cookiesArg = fs.existsSync(cookiesPath)
-    ? [`--cookies`, cookiesPath]
-    : ["--cookies-from-browser", "chrome"];
+  const cookiesArg = getCookieArgs();
+  const antiDetectionArgs = getAntiDetectionArgs();
 
   const timestamp = Date.now();
   const filename = `movvify_${timestamp}.mp4`;
@@ -237,6 +295,7 @@ router.get("/progress", (req, res) => {
     filepath,
     url,
     ...cookiesArg,
+    ...antiDetectionArgs,
   ];
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -266,6 +325,14 @@ router.get("/progress", (req, res) => {
   yt.stderr.on("data", (err) => {
     const text = err.toString();
     console.error(text);
+    
+    // Check for bot detection errors
+    if (isBotDetectionError(text)) {
+      res.write(`data: error:rate_limit\n\n`);
+      res.end();
+      return;
+    }
+    
     // Also check stderr for progress (yt-dlp sometimes outputs progress to stderr)
     const match = text.match(/\[download\]\s+(\d+\.\d+)%/);
     if (match) {

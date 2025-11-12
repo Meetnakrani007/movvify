@@ -73,13 +73,23 @@ document.addEventListener("DOMContentLoaded", () => {
     progressArea.style.display = "block";
     progressFill.style.width = "0%";
 
+    // Base delay between downloads (increases if rate limited)
+    let delayBetweenDownloads = 3000; // Start with 3 seconds
+    let consecutiveFailures = 0;
+
     for (let i = 0; i < items.length; i++) {
       const v = items[i];
       const percent = Math.round(((i + 1) / items.length) * 100);
       showProgress(i + 1, items.length, percent);
 
       try {
-        progressText.innerText = `Downloading ${i + 1} / ${items.length}...`;
+        progressText.innerText = `Downloading ${i + 1} / ${items.length}: ${v.title.substring(0, 50)}...`;
+
+        // Add delay before each download (except first)
+        if (i > 0) {
+          progressText.innerText = `Waiting ${delayBetweenDownloads/1000}s before next download...`;
+          await waitFor(delayBetweenDownloads);
+        }
 
         // Send request to backend for each video
         const response = await fetch("/download", {
@@ -88,7 +98,26 @@ document.addEventListener("DOMContentLoaded", () => {
           body: JSON.stringify({ url: v.url, quality }),
         });
 
-        if (!response.ok) throw new Error("Download failed for " + v.title);
+        if (response.status === 429) {
+          // Rate limited - increase delay significantly
+          delayBetweenDownloads = Math.min(delayBetweenDownloads * 2, 30000); // Max 30 seconds
+          consecutiveFailures++;
+          progressText.innerText = `⚠️ Rate limited. Waiting ${delayBetweenDownloads/1000}s...`;
+          await waitFor(delayBetweenDownloads);
+          i--; // Retry this video
+          continue;
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error("Download failed for " + v.title);
+        }
+
+        // Reset failure counter on success
+        consecutiveFailures = 0;
+        if (delayBetweenDownloads > 3000) {
+          delayBetweenDownloads = Math.max(delayBetweenDownloads * 0.8, 3000); // Gradually reduce delay
+        }
 
         // Convert response to blob
         const blob = await response.blob();
@@ -102,12 +131,22 @@ document.addEventListener("DOMContentLoaded", () => {
         a.click();
         a.remove();
 
-        // Wait a bit before next video
-        await waitFor(1500);
+        // Wait before next video (with minimum delay)
+        await waitFor(Math.max(delayBetweenDownloads, 2000));
       } catch (err) {
         console.error("Error downloading video:", v.title, err);
-        progressText.innerText = `❌ Failed: ${v.title}`;
-        await waitFor(1000);
+        consecutiveFailures++;
+        
+        if (consecutiveFailures >= 3) {
+          progressText.innerText = `❌ Too many failures. Please wait a few minutes and try again.`;
+          overallProgress.innerText = `Stopped after ${i} downloads due to rate limiting.`;
+          break;
+        }
+        
+        progressText.innerText = `❌ Failed: ${v.title}. Retrying...`;
+        delayBetweenDownloads = Math.min(delayBetweenDownloads * 1.5, 20000);
+        await waitFor(delayBetweenDownloads);
+        i--; // Retry this video
       }
     }
 
@@ -160,12 +199,17 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       
-      if (data === "error") {
-        progressText.innerText = "Download failed. Please try again.";
+      if (data === "error" || data.startsWith("error:")) {
         evtSrc.close();
+        if (data.includes("rate_limit")) {
+          progressText.innerText = "⚠️ YouTube rate limit detected. Please wait 2-3 minutes and try again.";
+          overallProgress.innerText = "Tip: Update your cookies.txt file or wait before retrying.";
+        } else {
+          progressText.innerText = "Download failed. Please try again.";
+        }
         setTimeout(() => {
           progressArea.style.display = "none";
-        }, 3000);
+        }, 5000);
         return;
       }
       
