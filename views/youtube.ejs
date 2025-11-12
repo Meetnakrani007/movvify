@@ -13,14 +13,24 @@
         <h1 class="brand small">Movvify</h1>
         <h2>🎥 YouTube Downloader</h2>
 
-
+        <!-- Form -->
         <form class="panel" action="/download" method="POST" target="_blank">
             <label for="urlInput">Paste YouTube link</label>
             <input type="url" id="urlInput" name="url" placeholder="https://youtu.be/..." required />
 
-
+            <!-- Thumbnail Preview -->
             <div id="thumbnailPreview" class="thumbnail-box"></div>
 
+            <!-- Playlist Info Area -->
+            <div id="playlistArea" class="playlist-area" style="display:none;">
+                <h3 id="playlistTitle"></h3>
+                <p id="playlistCount"></p>
+                <div id="playlistItems"></div>
+                <button id="downloadAllBtn" type="button" class="button">Download All 🎬</button>
+                <p id="overallProgress" class="hint"></p>
+            </div>
+
+            <!-- Quality Selection -->
             <label>Choose quality</label>
             <select name="quality" required>
                 <option value="144">144p (Low)</option>
@@ -34,38 +44,25 @@
                 <option value="best">Best Available</option>
             </select>
 
-            <button type="submit">Download 🎬</button>
+            <!-- Single Video Download -->
+            <button type="submit" id="singleDownloadBtn">Download 🎬</button>
+
+            <!-- Progress area (for both single + playlist) -->
+            <div id="progressArea" class="progress-area" style="display:none;">
+                <div class="progress-text" id="progressText">Preparing download...</div>
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+            </div>
+
             <p class="hint">Files will save to your browser's Downloads folder.</p>
         </form>
 
         <p><a class="link" href="/">← Back to Home</a></p>
     </main>
 
-
-    <script>
-        const urlInput = document.getElementById("urlInput");
-        const preview = document.getElementById("thumbnailPreview");
-
-        urlInput.addEventListener("input", () => {
-            const url = urlInput.value.trim();
-            const videoId = extractYouTubeID(url);
-            if (videoId) {
-                const thumbURL = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-                preview.innerHTML = `
-          <img src="${thumbURL}" alt="Thumbnail" class="thumbnail-img" />
-        `;
-            } else {
-                preview.innerHTML = "";
-            }
-        });
-
-        function extractYouTubeID(url) {
-            const regex =
-                /(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
-            const match = url.match(regex);
-            return match ? match[1] : null;
-        }
-    </script>
+    <!-- External JS -->
+    <script src="/js/app.js"></script>
 </body>
 
 </html>

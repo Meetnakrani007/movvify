@@ -3,7 +3,7 @@ const path = require("path");
 const { urlencoded } = require("body-parser");
 const indexRoute = require("./routes/index.js");
 const youtubeRoute = require("./routes/youtube.js");
-const sptifyRoute = require("./routes/spotify.js");
+const spotifyRoute = require("./routes/spotify.js");
 const downloadRoute = require("./routes/download.js");
 
 const app = express();
@@ -20,7 +20,7 @@ app.set("views", path.join(__dirname, "views"));
 
 app.use("/", indexRoute);
 app.use("/yt", youtubeRoute);
-app.use("/spotify", sptifyRoute);
+app.use("/spotify", spotifyRoute);
 app.use("/download", downloadRoute);
 
 const PORT = process.env.PORT || 6464;
