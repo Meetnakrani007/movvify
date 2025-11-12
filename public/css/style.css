@@ -88,3 +88,16 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+.thumbnail-box {
+  text-align: center;
+  margin: 15px 0;
+}
+
+.thumbnail-img {
+  width: 100%;
+  max-width: 360px;
+  border-radius: 10px;
+  border: 1px solid #1e293b;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
+}
