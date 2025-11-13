@@ -9,6 +9,39 @@ const cookiesPath = path.join(process.cwd(), "cookies.txt");
 
 if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
 
+function ensureCookieFileFromEnv() {
+  try {
+    const base64 = process.env.YOUTUBE_COOKIES_B64;
+    const raw = process.env.YOUTUBE_COOKIES;
+    const shouldOverwrite =
+      String(process.env.OVERWRITE_COOKIES_FILE || "").toLowerCase() ===
+      "true";
+
+    if (!base64 && !raw) {
+      return;
+    }
+
+    const cookieData = base64
+      ? Buffer.from(base64, "base64").toString("utf8")
+      : raw || "";
+
+    if (!cookieData.trim()) {
+      return;
+    }
+
+    if (!fs.existsSync(cookiesPath) || shouldOverwrite) {
+      fs.writeFileSync(cookiesPath, cookieData, "utf8");
+      console.log(
+        `Loaded cookies from environment into ${cookiesPath} (overwrite=${shouldOverwrite})`
+      );
+    }
+  } catch (err) {
+    console.error("Failed to load cookies from environment:", err);
+  }
+}
+
+ensureCookieFileFromEnv();
+
 const isRenderEnv = Boolean(process.env.RENDER);
 const disableBrowserCookies =
   String(process.env.USE_BROWSER_COOKIES || "").toLowerCase() === "false";
