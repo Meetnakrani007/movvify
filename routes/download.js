@@ -9,6 +9,10 @@ const cookiesPath = path.join(process.cwd(), "cookies.txt");
 
 if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
 
+const isRenderEnv = Boolean(process.env.RENDER);
+const disableBrowserCookies =
+  String(process.env.USE_BROWSER_COOKIES || "").toLowerCase() === "false";
+
 // Helper function to get cookie arguments with fallback
 function getCookieArgs() {
   if (fs.existsSync(cookiesPath)) {
@@ -23,6 +27,9 @@ function getCookieArgs() {
     }
   }
   // Fallback to browser cookies
+  if (disableBrowserCookies || isRenderEnv) {
+    return [];
+  }
   return ["--cookies-from-browser", "chrome"];
 }
 
