@@ -12,6 +12,24 @@ document.addEventListener("DOMContentLoaded", () => {
   const progressFill = document.getElementById("progressFill");
   const form = document.querySelector(".panel");
 
+  function formatDownloadFilename(rawTitle) {
+    let title = rawTitle || "video";
+    try {
+      title = title
+        .normalize("NFKD")
+        .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    } catch (err) {
+      title = (rawTitle || "video").replace(/\s+/g, " ").trim();
+    }
+
+    if (!title) title = "video";
+    if (title.length > 80) title = title.slice(0, 80).trim();
+
+    return `movvify_${title}.mp4`;
+  }
+
   urlInput.addEventListener("input", async () => {
     const url = urlInput.value.trim();
     preview.innerHTML = "";
@@ -95,7 +113,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const response = await fetch("/download", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: v.url, quality }),
+          body: JSON.stringify({ url: v.url, quality, title: v.title }),
         });
 
         if (response.status === 429) {
@@ -126,7 +144,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Trigger download automatically
         const a = document.createElement("a");
         a.href = fileURL;
-        a.download = `${v.title.replace(/[^\w\s]/gi, "_")}.mp4`;
+        a.download = formatDownloadFilename(v.title);
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -190,7 +208,9 @@ document.addEventListener("DOMContentLoaded", () => {
         setTimeout(() => {
           evtSrc.close();
           // Serve the already-downloaded file
-          const downloadUrl = `/download/file/${downloadFilename}`;
+          const downloadUrl = `/download/file/${encodeURIComponent(
+            downloadFilename
+          )}`;
           window.location.href = downloadUrl;
           setTimeout(() => {
             progressArea.style.display = "none";

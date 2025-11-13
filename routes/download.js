@@ -1,5 +1,5 @@
 const express = require("express");
-const { exec } = require("child_process");
+const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
@@ -26,20 +26,6 @@ function getCookieArgs() {
   return ["--cookies-from-browser", "chrome"];
 }
 
-// Helper function to get cookie args as string (for exec commands)
-function getCookieArgsString() {
-  if (fs.existsSync(cookiesPath)) {
-    const stats = fs.statSync(cookiesPath);
-    const fileSize = stats.size;
-    const ageInHours = (Date.now() - stats.mtime.getTime()) / (1000 * 60 * 60);
-    
-    if (fileSize > 100 && ageInHours < 168) {
-      return `--cookies "${cookiesPath}"`;
-    }
-  }
-  return "--cookies-from-browser chrome";
-}
-
 // Helper function to detect bot detection errors
 function isBotDetectionError(stderr) {
   if (!stderr) return false;
@@ -61,59 +47,187 @@ function getAntiDetectionArgs() {
   ];
 }
 
-router.post("/", (req, res) => {
+// Helper to build format selector with graceful fallbacks
+function buildFormatSelector(quality) {
+  if (!quality || quality === "best") {
+    return "bestvideo*+bestaudio/best";
+  }
+
+  const qInt = parseInt(quality, 10);
+  if (Number.isNaN(qInt)) {
+    return "bestvideo*+bestaudio/best";
+  }
+
+  return [
+    `bv*[height=${qInt}]+ba`,
+    `bv*[height<=${qInt}]+ba`,
+    `bestvideo[height<=${qInt}]+bestaudio`,
+    "bestvideo*+bestaudio",
+    "best",
+  ].join("/");
+}
+
+// Helper to run yt-dlp safely using spawn
+function runYtDlp(args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const yt = spawn("yt-dlp", args, {
+      shell: false,
+      ...options,
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    yt.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
+
+    yt.stderr.on("data", (data) => {
+      const text = data.toString();
+      stderr += text;
+      console.error(text.trim());
+    });
+
+    yt.on("error", (err) => {
+      err.stdout = stdout;
+      err.stderr = stderr;
+      reject(err);
+    });
+
+    yt.on("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(
+          `yt-dlp exited with code ${code}${stderr ? `: ${stderr}` : ""}`
+        );
+        error.code = code;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+      }
+    });
+  });
+}
+
+function sanitizeTitleForFilename(title) {
+  if (!title || typeof title !== "string") return "video";
+  let sanitized = title
+    .normalize("NFKD")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!sanitized) sanitized = "video";
+
+  // Limit length to avoid extremely long filenames
+  if (sanitized.length > 80) {
+    sanitized = sanitized.slice(0, 80).trim();
+  }
+
+  return sanitized;
+}
+
+function ensureUniqueFilepath(filepath) {
+  if (!fs.existsSync(filepath)) return filepath;
+
+  const dir = path.dirname(filepath);
+  const ext = path.extname(filepath);
+  const base = path.basename(filepath, ext);
+
+  let counter = 1;
+  let candidate = path.join(dir, `${base} (${counter})${ext}`);
+
+  while (fs.existsSync(candidate)) {
+    counter += 1;
+    candidate = path.join(dir, `${base} (${counter})${ext}`);
+  }
+
+  return candidate;
+}
+
+async function fetchVideoTitle(url) {
+  try {
+    const args = [
+      ...getCookieArgs(),
+      ...getAntiDetectionArgs(),
+      "--no-playlist",
+      "--skip-download",
+      "--print",
+      "title",
+      url,
+    ];
+
+    const { stdout } = await runYtDlp(args, { timeout: 20000 });
+    const lines = stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    return lines.pop() || null;
+  } catch (error) {
+    console.error("Title fetch error:", error.stderr || error.message);
+    return null;
+  }
+}
+
+async function prepareDownloadPath(url, providedTitle) {
+  const title = providedTitle || (await fetchVideoTitle(url)) || "video";
+  const sanitized = sanitizeTitleForFilename(title);
+  const baseFilename = `movvify_${sanitized}.mp4`;
+  const desiredPath = path.join(downloadsDir, baseFilename);
+  const filepath = ensureUniqueFilepath(desiredPath);
+
+  return {
+    filepath,
+    filename: path.basename(filepath),
+  };
+}
+
+router.post("/", async (req, res) => {
   const { url, quality } = req.body;
 
   if (!url || (!url.includes("youtube.com") && !url.includes("youtu.be"))) {
     return res.status(400).send("<h3>Please enter a valid YouTube URL.</h3>");
   }
 
-  const timestamp = Date.now();
-  const filename = `movvify_${timestamp}.mp4`;
-  const filepath = path.join(downloadsDir, filename);
-
-  const format =
-    quality === "144"
-      ? "bv*[height=144]+ba"
-      : quality === "240"
-      ? "bv*[height=240]+ba"
-      : quality === "360"
-      ? "bv*[height=360]+ba"
-      : quality === "480"
-      ? "bv*[height=480]+ba"
-      : quality === "720"
-      ? "bv*[height=720]+ba"
-      : quality === "1080"
-      ? "bv*[height=1080]+ba"
-      : quality === "1440"
-      ? "bv*[height=1440]+ba"
-      : quality === "2160"
-      ? "bv*[height=2160]+ba"
-      : "bv*+ba/best";
-
   const safeUrl = url.trim();
 
-  const cookiesArg = getCookieArgsString();
-  const antiDetectionArgs = getAntiDetectionArgs().join(" ");
-  const command = `yt-dlp ${cookiesArg} ${antiDetectionArgs} --no-check-certificate -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
+  let downloadInfo;
+  try {
+    downloadInfo = await prepareDownloadPath(safeUrl, req.body?.title);
+  } catch (error) {
+    console.error("Failed to resolve filename:", error);
+    const fallbackName = `movvify_video_${Date.now()}.mp4`;
+    const fallbackPath = ensureUniqueFilepath(
+      path.join(downloadsDir, fallbackName)
+    );
+    downloadInfo = {
+      filepath: fallbackPath,
+      filename: path.basename(fallbackPath),
+    };
+  }
+
+  const { filepath, filename } = downloadInfo;
+
+  const format = buildFormatSelector(quality);
+
+  const args = [
+    ...getCookieArgs(),
+    ...getAntiDetectionArgs(),
+    "--no-check-certificate",
+    "-f",
+    format,
+    "--merge-output-format",
+    "mp4",
+    "-o",
+    filepath,
+    safeUrl,
+  ];
 
   console.log(`Starting download for single video: ${safeUrl}`);
 
-  exec(command, { timeout: 300000 }, (error, stdout, stderr) => {
-    if (error) {
-      console.error("Download error:", stderr);
-      
-      if (isBotDetectionError(stderr)) {
-        return res
-          .status(429)
-          .send("<h3>YouTube rate limit detected. Please wait a few minutes and try again, or update your cookies file.</h3>");
-      }
-      
-      return res
-        .status(500)
-        .send("<h3>Download failed. Please check your link or try again.</h3>");
-    }
-
+  try {
+    await runYtDlp(args, { timeout: 300000 });
     console.log("Single video download complete:", filename);
 
     res.download(filepath, filename, (err) => {
@@ -125,7 +239,26 @@ router.post("/", (req, res) => {
         }
       }, 3000);
     });
-  });
+  } catch (error) {
+    const stderr = error.stderr || "";
+    console.error("Download error:", stderr || error.message);
+
+    if (isBotDetectionError(stderr)) {
+      return res
+        .status(429)
+        .send(
+          "<h3>YouTube rate limit detected. Please wait a few minutes and try again, or update your cookies file.</h3>"
+        );
+    }
+
+    res
+      .status(500)
+      .send("<h3>Download failed. Please check your link or try again.</h3>");
+
+    if (fs.existsSync(filepath)) {
+      fs.unlinkSync(filepath);
+    }
+  }
 });
 
 router.post("/playlist-info", (req, res) => {
@@ -138,38 +271,42 @@ router.post("/playlist-info", (req, res) => {
 
   console.log(`Fetching playlist info for: ${url}`);
 
-  const cookiesArg = getCookieArgsString();
-  const antiDetectionArgs = getAntiDetectionArgs().join(" ");
-  const command = `yt-dlp ${cookiesArg} ${antiDetectionArgs} --flat-playlist -J "${url}"`;
+  const args = [
+    ...getCookieArgs(),
+    ...getAntiDetectionArgs(),
+    "--flat-playlist",
+    "-J",
+    url,
+  ];
 
-  exec(command, { maxBuffer: 1024 * 1024 * 10, timeout: 60000 }, (error, stdout, stderr) => {
-    if (error) {
-      console.error("Playlist fetch error:", stderr);
-      return res
-        .status(500)
-        .json({ ok: false, message: "Failed to fetch playlist info." });
-    }
+  runYtDlp(args, { timeout: 60000 })
+    .then(({ stdout }) => {
+      try {
+        const json = JSON.parse(stdout);
+        const items = (json.entries || []).map((e) => ({
+          id: e.id,
+          title: e.title || "Untitled Video",
+          url: `https://www.youtube.com/watch?v=${e.id}`,
+        }));
 
-    try {
-      const json = JSON.parse(stdout);
-      const items = (json.entries || []).map((e) => ({
-        id: e.id,
-        title: e.title || "Untitled Video",
-        url: `https://www.youtube.com/watch?v=${e.id}`,
-      }));
-
-      res.json({
-        ok: true,
-        playlist_title: json.title || "YouTube Playlist",
-        items,
-      });
-    } catch (err) {
-      console.error("JSON parse error:", err);
+        res.json({
+          ok: true,
+          playlist_title: json.title || "YouTube Playlist",
+          items,
+        });
+      } catch (err) {
+        console.error("JSON parse error:", err);
+        res
+          .status(500)
+          .json({ ok: false, message: "Error parsing playlist data." });
+      }
+    })
+    .catch((error) => {
+      console.error("Playlist fetch error:", error.stderr || error.message);
       res
         .status(500)
-        .json({ ok: false, message: "Error parsing playlist data." });
-    }
-  });
+        .json({ ok: false, message: "Failed to fetch playlist info." });
+    });
 });
 
 router.get("/file/:filename", (req, res) => {
@@ -191,53 +328,50 @@ router.get("/file/:filename", (req, res) => {
   });
 });
 
-router.get("/download-video", (req, res) => {
+router.get("/download-video", async (req, res) => {
   const videoUrl = req.query.url;
   const quality = req.query.quality || "best";
 
   if (!videoUrl) return res.status(400).send("Missing video URL.");
 
-  const timestamp = Date.now();
-  const filename = `movvify_${timestamp}.mp4`;
-  const filepath = path.join(downloadsDir, filename);
-
-  const format =
-    quality === "144"
-      ? "bv*[height=144]+ba"
-      : quality === "240"
-      ? "bv*[height=240]+ba"
-      : quality === "360"
-      ? "bv*[height=360]+ba"
-      : quality === "480"
-      ? "bv*[height=480]+ba"
-      : quality === "720"
-      ? "bv*[height=720]+ba"
-      : quality === "1080"
-      ? "bv*[height=1080]+ba"
-      : quality === "1440"
-      ? "bv*[height=1440]+ba"
-      : quality === "2160"
-      ? "bv*[height=2160]+ba"
-      : "bv*+ba/best";
-
   const safeUrl = videoUrl.trim();
-  const cookiesArg = getCookieArgsString();
-  const antiDetectionArgs = getAntiDetectionArgs().join(" ");
-  const command = `yt-dlp ${cookiesArg} ${antiDetectionArgs} -f "${format}" --merge-output-format mp4 -o "${filepath}" "${safeUrl}"`;
+
+  let downloadInfo;
+  try {
+    downloadInfo = await prepareDownloadPath(safeUrl, req.query?.title);
+  } catch (error) {
+    console.error("Failed to resolve filename:", error);
+    const fallbackName = `movvify_video_${Date.now()}.mp4`;
+    const fallbackPath = ensureUniqueFilepath(
+      path.join(downloadsDir, fallbackName)
+    );
+    downloadInfo = {
+      filepath: fallbackPath,
+      filename: path.basename(fallbackPath),
+    };
+  }
+
+  const { filepath, filename } = downloadInfo;
+
+  const format = buildFormatSelector(quality);
+
+  const args = [
+    ...getCookieArgs(),
+    ...getAntiDetectionArgs(),
+    "--no-check-certificate",
+    "-f",
+    format,
+    "--merge-output-format",
+    "mp4",
+    "-o",
+    filepath,
+    safeUrl,
+  ];
 
   console.log(`Starting download for: ${safeUrl}`);
 
-  exec(command, { timeout: 300000 }, (error, stdout, stderr) => {
-    if (error) {
-      console.error("Error downloading video:", stderr);
-      
-      if (isBotDetectionError(stderr)) {
-        return res.status(429).send("YouTube rate limit detected. Please wait a few minutes and try again.");
-      }
-      
-      return res.status(500).send("Download failed.");
-    }
-
+  try {
+    await runYtDlp(args, { timeout: 300000 });
     console.log("Video download complete:", filename);
 
     res.download(filepath, filename, (err) => {
@@ -249,51 +383,62 @@ router.get("/download-video", (req, res) => {
         }
       }, 3000);
     });
-  });
+  } catch (error) {
+    const stderr = error.stderr || "";
+    console.error("Error downloading video:", stderr || error.message);
+
+    if (isBotDetectionError(stderr)) {
+      return res
+        .status(429)
+        .send("YouTube rate limit detected. Please wait a few minutes and try again.");
+    }
+
+    res.status(500).send("Download failed.");
+
+    if (fs.existsSync(filepath)) {
+      fs.unlinkSync(filepath);
+    }
+  }
 });
 
-const { spawn } = require("child_process");
-
-router.get("/progress", (req, res) => {
+router.get("/progress", async (req, res) => {
   const { url, quality } = req.query;
   if (!url) return res.status(400).end();
 
-  const format =
-    quality === "144"
-      ? "bv*[height=144]+ba"
-      : quality === "240"
-      ? "bv*[height=240]+ba"
-      : quality === "360"
-      ? "bv*[height=360]+ba"
-      : quality === "480"
-      ? "bv*[height=480]+ba"
-      : quality === "720"
-      ? "bv*[height=720]+ba"
-      : quality === "1080"
-      ? "bv*[height=1080]+ba"
-      : quality === "1440"
-      ? "bv*[height=1440]+ba"
-      : quality === "2160"
-      ? "bv*[height=2160]+ba"
-      : "bv*+ba/best";
+  const safeUrl = url.trim();
+  const format = buildFormatSelector(quality);
 
   const cookiesArg = getCookieArgs();
   const antiDetectionArgs = getAntiDetectionArgs();
 
-  const timestamp = Date.now();
-  const filename = `movvify_${timestamp}.mp4`;
-  const filepath = path.join(downloadsDir, filename);
+  let downloadInfo;
+  try {
+    downloadInfo = await prepareDownloadPath(safeUrl, req.query?.title);
+  } catch (error) {
+    console.error("Failed to resolve filename:", error);
+    const fallbackName = `movvify_video_${Date.now()}.mp4`;
+    const fallbackPath = ensureUniqueFilepath(
+      path.join(downloadsDir, fallbackName)
+    );
+    downloadInfo = {
+      filepath: fallbackPath,
+      filename: path.basename(fallbackPath),
+    };
+  }
+
+  const { filepath, filename } = downloadInfo;
 
   const args = [
     "--newline",
     "-f",
     format,
     "--no-playlist",
+    "--no-check-certificate",
     "--merge-output-format",
     "mp4",
     "-o",
     filepath,
-    url,
+    safeUrl,
     ...cookiesArg,
     ...antiDetectionArgs,
   ];
